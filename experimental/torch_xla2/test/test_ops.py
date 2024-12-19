@@ -8,6 +8,7 @@ from torch.testing._internal.common_device_type import (
 from torch.utils import _pytree as pytree
 from torch_xla2 import tensor
 import torch_xla2
+import torchvision
 
 
 skiplist = {
@@ -233,6 +234,31 @@ class TestOpInfo(TestCase):
 
       run_export_and_compare(self, op, sample_input, check_output, 
                              ignore_indices=ignore_index)
+
+  def test_roi_align(self):
+    input_tensor = torch.randn(1, 3, 10, 10)
+    boxes = torch.tensor([[1, 1, 6, 6], [2, 2, 7, 7]], dtype=torch.float32)
+    output_size = (5, 5)
+    spatial_scale = 1.0
+    sampling_ratio = 2
+    aligned = True
+
+    cpu_output = torchvision.ops.roi_align(input_tensor, boxes, output_size, spatial_scale, sampling_ratio, aligned)
+
+    xla_input = input_tensor.to('xla')
+    xla_boxes = boxes.to('xla')
+    xla_output = torchvision.ops.roi_align(xla_input, xla_boxes, output_size, spatial_scale, sampling_ratio, aligned)
+    xla_output_cpu = xla_output.cpu()
+
+    torch.testing.assert_close(cpu_output, xla_output_cpu)
+
+    aligned = False
+    cpu_output = torchvision.ops.roi_align(input_tensor, boxes, output_size, spatial_scale, sampling_ratio, aligned)
+    xla_output = torchvision.ops.roi_align(xla_input, xla_boxes, output_size, spatial_scale, sampling_ratio, aligned)
+    xla_output_cpu = xla_output.cpu()
+
+    torch.testing.assert_close(cpu_output, xla_output_cpu)
+
 
 
 instantiate_device_type_tests(TestOpInfo, globals(), only_for='cpu')

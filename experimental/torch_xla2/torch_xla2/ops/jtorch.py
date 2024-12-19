@@ -414,3 +414,50 @@ def linalg_tensorsolve(A, b, dims=None):
   if A.shape[:b.ndim] != b.shape:
     b = jnp.reshape(b, A.shape[:b.ndim])
   return jnp.linalg.tensorsolve(A, b, axes=dims)
+
+
+def roi_align_jax(input, boxes, output_size, spatial_scale, sampling_ratio, aligned):
+  from jax.scipy.ndimage import map_coordinates
+  output_size_y, output_size_x = output_size
+  boxes_y1, boxes_x1, boxes_y2, boxes_x2 = jnp.split(boxes, 4, axis=-1)
+  height, width = input.shape[-2:]
+  grid_y = jnp.arange(0, output_size_y, dtype=boxes.dtype)
+  grid_x = jnp.arange(0, output_size_x, dtype=boxes.dtype)
+  if aligned:
+      boxes_y1_grid = boxes_y1 * output_size_y / (boxes_y2 - boxes_y1)
+      boxes_x1_grid = boxes_x1 * output_size_x / (boxes_x2 - boxes_x1)
+      boxes_y2_grid = boxes_y2 * output_size_y / (boxes_y2 - boxes_y1)
+      boxes_x2_grid = boxes_x2 * output_size_x / (boxes_x2 - boxes_x1)
+      boxes_y1_grid = jnp.floor(boxes_y1_grid)
+      boxes_x1_grid = jnp.floor(boxes_x1_grid)
+      boxes_y2_grid = jnp.ceil(boxes_y2_grid)
+      boxes_x2_grid = jnp.ceil(boxes_x2_grid)
+      gy = boxes_y1_grid[:, :, None] + (boxes_y2_grid - boxes_y1_grid)[:, :, None] * grid_y[None, None, :] / (output_size_y - 1)
+      gx = boxes_x1_grid[:, :, None] + (boxes_x2_grid - boxes_x1_grid)[:, :, None] * grid_x[None, None, :] / (output_size_x - 1)
+  else:
+      gy = boxes_y1[:, :, None] * output_size_y + (boxes_y2 - boxes_y1)[:, :, None] * grid_y[None, None, :] / (output_size_y - 1)
+      gx = boxes_x1[:, :, None] * output_size_x + (boxes_x2 - boxes_x1)[:, :, None] * grid_x[None, None, :] / (output_size_x - 1)
+  y = gy / height * spatial_scale
+  x = gx / width * spatial_scale
+
+  if sampling_ratio > 0:
+    num_samples_y = sampling_ratio
+    num_samples_x = sampling_ratio
+    delta_y = (boxes_y2 - boxes_y1) / output_size_y / num_samples_y * spatial_scale
+    delta_x = (boxes_x2 - boxes_x1) / output_size_x / num_samples_x * spatial_scale
+    y += delta_y[:, :, None] * (jnp.arange(num_samples_y, dtype=boxes.dtype) - (num_samples_y - 1) / 2)[None, None, :]
+    x += delta_x[:, :, None] * (jnp.arange(num_samples_x, dtype=boxes.dtype) - (num_samples_x - 1) / 2)[None, None, :]
+    y = jnp.clip(y, 0, height - 1)
+    x = jnp.clip(x, 0, width - 1)
+    y = y.reshape(*y.shape[:-2], -1)
+    x = x.reshape(*x.shape[:-2], -1)
+    output = map_coordinates(input, [y, x], order=1, mode='nearest', prefilter=False)
+    output = output.reshape(*output.shape[:-1], output_size_y, output_size_x, num_samples_y, num_samples_x)
+    output = jnp.mean(output, axis=(-2, -1))
+  else:
+    y = jnp.clip(y, 0, height - 1)
+    x = jnp.clip(x, 0, width - 1)
+    output = map_coordinates(input, [y, x], order=1, mode='nearest', prefilter=False)
+
+  return output
+

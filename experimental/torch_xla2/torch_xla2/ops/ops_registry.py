@@ -34,6 +34,9 @@ def register_torch_dispatch_op(
     all_aten_ops[aten_op] = op
     return impl_callable
 
+from torch_xla2.ops import jtorch
+register_torch_dispatch_op(torch.ops.torchvision.roi_align, jtorch.roi_align_jax)
+
 
 def register_torch_function_op(
     torch_func, impl_callable,
